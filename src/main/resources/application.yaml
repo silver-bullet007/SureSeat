@@ -12,13 +12,14 @@ spring:
     hibernate:
       ddl-auto: update   # auto-creates/updates tables from your entities — great for learning, we'll tighten this later
     show-sql: true        # prints every SQL query Hibernate runs — very useful while learning
+    open-in-view: false
     properties:
       hibernate:
         format_sql: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 
 server:
-  port: 8080
+  port: 8081
 
 logging:
   level:
