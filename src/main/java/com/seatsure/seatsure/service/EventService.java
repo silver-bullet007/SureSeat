@@ -44,6 +44,7 @@ public class EventService {
         return toResponse(saved);
     }
 
+    @Transactional(readOnly = true)
     public List<EventResponse> getAllEvents() {
         return eventRepository.findAll()
                 .stream()
@@ -51,6 +52,7 @@ public class EventService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public EventResponse getEventById(Long id) {
         Event event = eventRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("No event found with id " + id));
