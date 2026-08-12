@@ -9,6 +9,8 @@ import com.seatsure.seatsure.repository.EventRepository;
 import com.seatsure.seatsure.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.seatsure.seatsure.dto.CreateSeatsRequest;
+import com.seatsure.seatsure.dto.SeatResponse;
 
 import java.util.List;
 import java.util.NoSuchElementException;
