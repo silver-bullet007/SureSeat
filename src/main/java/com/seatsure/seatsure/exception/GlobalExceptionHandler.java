@@ -1,6 +1,7 @@
 package com.seatsure.seatsure.exception;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -35,6 +36,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
         return buildResponse(HttpStatus.CONFLICT,
                 "This seat was just booked by someone else. Please choose a different seat.");
+    }
+
+    // Thrown by Hibernate's @Version check when an UPDATE's WHERE clause
+    // (which includes "AND version = ?") matches zero rows - meaning
+    // someone else committed a change to this row first.
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, Object>> handleOptimisticLockFailure(ObjectOptimisticLockingFailureException ex) {
+        return buildResponse(HttpStatus.CONFLICT,
+                "This seat was updated by someone else while you were booking. Please try again.");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

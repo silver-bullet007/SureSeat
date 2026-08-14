@@ -59,8 +59,41 @@ public class BookingService {
         booking.setSeat(seat);
         booking.setStatus(Booking.BookingStatus.CONFIRMED);
 
+    // ===== OPTIMISTIC LOCKING VARIANT =====
+    // No FOR UPDATE, no blocking. Both concurrent requests can read and
+    // proceed freely. The @Version field on Seat is what saves us: Hibernate
+    // includes "AND version = ?" in the UPDATE's WHERE clause automatically.
+    // If another transaction already committed a change (bumping the version),
+    // this UPDATE affects ZERO rows, and Hibernate throws
+    // ObjectOptimisticLockingFailureException - which we catch and translate
+    // into the same clean 409 response.
+    @Transactional
+    public BookingResponse bookSeatOptimistic(CreateBookingRequest request) {
+        Seat seat = seatRepository.findById(request.seatId())
+                .orElseThrow(() -> new NoSuchElementException("No seat found with id " + request.seatId()));
+
+        if (seat.getStatus() != Seat.SeatStatus.AVAILABLE) {
+            throw new IllegalStateException("Seat " + seat.getSeatNumber() + " is not available");
+        }
+
+        User user = userRepository.findById(request.userId())
+                .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
+
+        seat.setStatus(Seat.SeatStatus.BOOKED);
+        seatRepository.save(seat); // <-- this is where a version mismatch throws, if it's going to
+
+        Booking booking = new Booking();
+        booking.setUser(user);
+        booking.setEvent(seat.getEvent());
+        booking.setSeat(seat);
+        booking.setStatus(Booking.BookingStatus.CONFIRMED);
+
         Booking saved = bookingRepository.save(booking);
 
+        return buildResponse(saved, seat, user);
+    }
+
+    private BookingResponse buildResponse(Booking saved, Seat seat, User user) {
         return new BookingResponse(
                 saved.getId(),
                 seat.getEvent().getTitle(),

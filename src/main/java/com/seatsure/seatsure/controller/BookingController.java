@@ -26,4 +26,12 @@ public class BookingController {
         BookingResponse response = bookingService.bookSeat(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
+
+    // Same booking flow, but using optimistic locking - for direct
+    // side-by-side comparison against the pessimistic version above.
+    @PostMapping("/optimistic")
+    public ResponseEntity<BookingResponse> bookSeatOptimistic(@Valid @RequestBody CreateBookingRequest request) {
+        BookingResponse response = bookingService.bookSeatOptimistic(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
 }
