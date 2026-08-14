@@ -59,6 +59,12 @@ public class BookingService {
         booking.setSeat(seat);
         booking.setStatus(Booking.BookingStatus.CONFIRMED);
 
+        Booking saved = bookingRepository.save(booking);
+
+        return buildResponse(saved, seat, user);
+
+    }
+
     // ===== OPTIMISTIC LOCKING VARIANT =====
     // No FOR UPDATE, no blocking. Both concurrent requests can read and
     // proceed freely. The @Version field on Seat is what saves us: Hibernate
