@@ -2,19 +2,28 @@ package com.seatsure.seatsure.service;
 
 import com.seatsure.seatsure.dto.BookingResponse;
 import com.seatsure.seatsure.dto.CreateBookingRequest;
+import com.seatsure.seatsure.dto.HoldResponse;
 import com.seatsure.seatsure.entity.Booking;
 import com.seatsure.seatsure.entity.Seat;
 import com.seatsure.seatsure.entity.User;
 import com.seatsure.seatsure.repository.BookingRepository;
 import com.seatsure.seatsure.repository.SeatRepository;
 import com.seatsure.seatsure.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 @Service
 public class BookingService {
+
+    private static final Logger log = LoggerFactory.getLogger(BookingService.class);
+    private static final long HOLD_DURATION_MINUTES = 5;
 
     private final SeatRepository seatRepository;
     private final UserRepository userRepository;
@@ -28,18 +37,12 @@ public class BookingService {
         this.bookingRepository = bookingRepository;
     }
 
+    // Step 1 of the real flow: hold a seat for HOLD_DURATION_MINUTES.
     @Transactional
-    public BookingResponse bookSeat(CreateBookingRequest request) {
-        // Step 1: READ the seat's current status, WITH a row lock (FOR UPDATE).
-        // Any other transaction trying to lock this same row now BLOCKS here
-        // until we commit or roll back - no more racing on the read.
+    public HoldResponse holdSeat(CreateBookingRequest request) {
         Seat seat = seatRepository.findByIdForUpdate(request.seatId())
                 .orElseThrow(() -> new NoSuchElementException("No seat found with id " + request.seatId()));
 
-        // Step 2: CHECK if it's available. By the time a second, previously
-        // blocked request reaches this line, it is guaranteed to see the
-        // TRUE current status - BOOKED - because it could only proceed
-        // past Step 1 after the first transaction fully committed.
         if (seat.getStatus() != Seat.SeatStatus.AVAILABLE) {
             throw new IllegalStateException("Seat " + seat.getSeatNumber() + " is not available");
         }
@@ -47,9 +50,89 @@ public class BookingService {
         User user = userRepository.findById(request.userId())
                 .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
 
-        // Step 3: WRITE - safe now, because we hold the lock and just
-        // verified the status ourselves, with no other transaction able
-        // to have changed it in between.
+        seat.setStatus(Seat.SeatStatus.HELD);
+        seatRepository.save(seat);
+
+        Booking booking = new Booking();
+        booking.setUser(user);
+        booking.setEvent(seat.getEvent());
+        booking.setSeat(seat);
+        booking.setStatus(Booking.BookingStatus.PENDING);
+        booking.setExpiresAt(LocalDateTime.now().plusMinutes(HOLD_DURATION_MINUTES));
+
+        Booking saved = bookingRepository.save(booking);
+
+        return new HoldResponse(
+                saved.getId(),
+                seat.getEvent().getTitle(),
+                seat.getSeatNumber(),
+                user.getEmail(),
+                saved.getStatus().name(),
+                saved.getExpiresAt());
+    }
+
+    // Step 2: confirm a held booking (simulating successful payment).
+    @Transactional
+    public BookingResponse confirmBooking(Long bookingId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new NoSuchElementException("No booking found with id " + bookingId));
+
+        if (booking.getStatus() != Booking.BookingStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Booking is not in a confirmable state (status: " + booking.getStatus() + ")");
+        }
+
+        if (booking.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new IllegalStateException("This hold has expired. Please book the seat again.");
+        }
+
+        booking.setStatus(Booking.BookingStatus.CONFIRMED);
+        Seat seat = booking.getSeat();
+        seat.setStatus(Seat.SeatStatus.BOOKED);
+        seatRepository.save(seat);
+        Booking saved = bookingRepository.save(booking);
+
+        return new BookingResponse(
+                saved.getId(),
+                seat.getEvent().getTitle(),
+                seat.getSeatNumber(),
+                booking.getUser().getEmail(),
+                saved.getStatus().name());
+    }
+
+    // Step 3: the background job. Runs on a fixed schedule, finds any
+    // PENDING booking whose hold has expired, and releases the seat.
+    @Scheduled(fixedRate = 60000) // runs every 60,000 ms = every 1 minute
+    @Transactional
+    public void releaseExpiredHolds() {
+        List<Booking> expired = bookingRepository.findExpiredPendingBookings(
+                Booking.BookingStatus.PENDING, LocalDateTime.now());
+
+        for (Booking booking : expired) {
+            booking.setStatus(Booking.BookingStatus.EXPIRED);
+            Seat seat = booking.getSeat();
+            seat.setStatus(Seat.SeatStatus.AVAILABLE);
+            seatRepository.save(seat);
+            bookingRepository.save(booking);
+            log.info("Released expired hold: booking {} seat {}", booking.getId(), seat.getSeatNumber());
+        }
+    }
+
+    // ===== Kept from Stage 2, for comparing pessimistic vs optimistic locking
+    // =====
+
+    @Transactional
+    public BookingResponse bookSeat(CreateBookingRequest request) {
+        Seat seat = seatRepository.findByIdForUpdate(request.seatId())
+                .orElseThrow(() -> new NoSuchElementException("No seat found with id " + request.seatId()));
+
+        if (seat.getStatus() != Seat.SeatStatus.AVAILABLE) {
+            throw new IllegalStateException("Seat " + seat.getSeatNumber() + " is not available");
+        }
+
+        User user = userRepository.findById(request.userId())
+                .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
+
         seat.setStatus(Seat.SeatStatus.BOOKED);
         seatRepository.save(seat);
 
@@ -60,19 +143,9 @@ public class BookingService {
         booking.setStatus(Booking.BookingStatus.CONFIRMED);
 
         Booking saved = bookingRepository.save(booking);
-
         return buildResponse(saved, seat, user);
-
     }
 
-    // ===== OPTIMISTIC LOCKING VARIANT =====
-    // No FOR UPDATE, no blocking. Both concurrent requests can read and
-    // proceed freely. The @Version field on Seat is what saves us: Hibernate
-    // includes "AND version = ?" in the UPDATE's WHERE clause automatically.
-    // If another transaction already committed a change (bumping the version),
-    // this UPDATE affects ZERO rows, and Hibernate throws
-    // ObjectOptimisticLockingFailureException - which we catch and translate
-    // into the same clean 409 response.
     @Transactional
     public BookingResponse bookSeatOptimistic(CreateBookingRequest request) {
         Seat seat = seatRepository.findById(request.seatId())
@@ -86,7 +159,7 @@ public class BookingService {
                 .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
 
         seat.setStatus(Seat.SeatStatus.BOOKED);
-        seatRepository.save(seat); // <-- this is where a version mismatch throws, if it's going to
+        seatRepository.save(seat);
 
         Booking booking = new Booking();
         booking.setUser(user);
@@ -95,7 +168,6 @@ public class BookingService {
         booking.setStatus(Booking.BookingStatus.CONFIRMED);
 
         Booking saved = bookingRepository.save(booking);
-
         return buildResponse(saved, seat, user);
     }
 
