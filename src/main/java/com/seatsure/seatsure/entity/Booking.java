@@ -31,8 +31,9 @@ public class Booking {
     // One booking = exactly one seat here, for simplicity.
     // A user wanting 3 seats makes 3 Booking rows. We can revisit this
     // design choice once the core flow works.
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "seat_id", nullable = false, unique = true)
+    // changing it from OneToOne bookings to ManyToOne bookings 
+    @ManyToOne(fetch = FetchType.LAZY) 
+    @JoinColumn(name = "seat_id", nullable = false)
     private Seat seat;
 
     @Enumerated(EnumType.STRING)
