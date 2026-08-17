@@ -21,6 +21,10 @@ spring:
 server:
   port: 8081
 
+jwt:
+  secret: this-is-a-temporary-dev-secret-key-change-me-before-any-real-deployment-1234567890
+  expiration-ms: 86400000   # 24 hours, in milliseconds
+
 logging:
   level:
     org.hibernate.SQL: debug
