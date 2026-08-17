@@ -29,6 +29,14 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    // Used for bad login credentials - 401 Unauthorized is the correct
+    // status for "you failed to authenticate", distinct from 403 Forbidden
+    // (which means "you ARE authenticated, but not allowed to do this").
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleBadCredentials(IllegalArgumentException ex) {
+        return buildResponse(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
     // This is the one that catches our race-condition crash from the unique
     // constraint violation, and turns it into a clean 409 instead of a
     // leaked stack trace.
