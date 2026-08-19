@@ -9,6 +9,7 @@ import com.seatsure.seatsure.entity.User;
 import com.seatsure.seatsure.repository.BookingRepository;
 import com.seatsure.seatsure.repository.SeatRepository;
 import com.seatsure.seatsure.repository.UserRepository;
+import com.seatsure.seatsure.security.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -47,8 +48,8 @@ public class BookingService {
             throw new IllegalStateException("Seat " + seat.getSeatNumber() + " is not available");
         }
 
-        User user = userRepository.findById(request.userId())
-                .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
+        User user = userRepository.findByEmail(SecurityUtils.getCurrentUserEmail())
+                .orElseThrow(() -> new NoSuchElementException("Authenticated user not found in database"));
 
         seat.setStatus(Seat.SeatStatus.HELD);
         seatRepository.save(seat);
@@ -130,8 +131,8 @@ public class BookingService {
             throw new IllegalStateException("Seat " + seat.getSeatNumber() + " is not available");
         }
 
-        User user = userRepository.findById(request.userId())
-                .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
+        User user = userRepository.findByEmail(SecurityUtils.getCurrentUserEmail())
+                .orElseThrow(() -> new NoSuchElementException("Authenticated user not found in database"));
 
         seat.setStatus(Seat.SeatStatus.BOOKED);
         seatRepository.save(seat);
@@ -155,8 +156,8 @@ public class BookingService {
             throw new IllegalStateException("Seat " + seat.getSeatNumber() + " is not available");
         }
 
-        User user = userRepository.findById(request.userId())
-                .orElseThrow(() -> new NoSuchElementException("No user found with id " + request.userId()));
+        User user = userRepository.findByEmail(SecurityUtils.getCurrentUserEmail())
+                .orElseThrow(() -> new NoSuchElementException("Authenticated user not found in database"));
 
         seat.setStatus(Seat.SeatStatus.BOOKED);
         seatRepository.save(seat);
