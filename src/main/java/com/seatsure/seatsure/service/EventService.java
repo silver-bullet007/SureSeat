@@ -1,17 +1,18 @@
 package com.seatsure.seatsure.service;
 
 import com.seatsure.seatsure.dto.CreateEventRequest;
+import com.seatsure.seatsure.dto.CreateSeatsRequest;
 import com.seatsure.seatsure.dto.EventResponse;
+import com.seatsure.seatsure.dto.SeatResponse;
 import com.seatsure.seatsure.entity.Event;
 import com.seatsure.seatsure.entity.Seat;
 import com.seatsure.seatsure.entity.User;
 import com.seatsure.seatsure.repository.EventRepository;
 import com.seatsure.seatsure.repository.UserRepository;
 import com.seatsure.seatsure.security.SecurityUtils;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.seatsure.seatsure.dto.CreateSeatsRequest;
-import com.seatsure.seatsure.dto.SeatResponse;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -30,6 +31,11 @@ public class EventService {
         this.userRepository = userRepository;
     }
 
+    // hasAnyRole checks the CURRENT authenticated user's granted authorities
+    // (set back in CustomUserDetailsService as "ROLE_" + role) against this
+    // list. Spring evaluates this BEFORE the method body runs at all - a
+    // plain USER's request never even reaches our code below.
+    @PreAuthorize("hasAnyRole('ORGANIZER', 'ADMIN')")
     @Transactional
     public EventResponse createEvent(CreateEventRequest request) {
         // Ignore any client-supplied organizer identity entirely - use
