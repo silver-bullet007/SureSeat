@@ -7,10 +7,9 @@ import com.seatsure.seatsure.entity.Seat;
 import com.seatsure.seatsure.entity.User;
 import com.seatsure.seatsure.repository.EventRepository;
 import com.seatsure.seatsure.repository.UserRepository;
+import com.seatsure.seatsure.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.seatsure.seatsure.dto.CreateSeatsRequest;
-import com.seatsure.seatsure.dto.SeatResponse;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -31,9 +30,14 @@ public class EventService {
 
     @Transactional
     public EventResponse createEvent(CreateEventRequest request) {
-        User organizer = userRepository.findById(request.organizerId())
+        // Ignore any client-supplied organizer identity entirely - use
+        // whoever the JWT actually proves this request is from. This is
+        // the fix for the exact security hole we identified: a client can
+        // no longer create an event "as" someone else.
+        String currentUserEmail = SecurityUtils.getCurrentUserEmail();
+        User organizer = userRepository.findByEmail(currentUserEmail)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "No user found with id " + request.organizerId()));
+                        "No user found with email " + currentUserEmail));
 
         Event event = new Event();
         event.setTitle(request.title());
@@ -62,32 +66,25 @@ public class EventService {
     }
 
     @Transactional
-    public List<SeatResponse> addSeats(Long event_id, CreateSeatsRequest request) {
-        // method will allow the organizer to add the seats that would be present for an
-        // event , default to AVAILABLE
+    public List<SeatResponse> addSeats(Long eventId, CreateSeatsRequest request) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new NoSuchElementException("No event found with id " + eventId));
 
-        // first lets do a confirmation and check if the event is present
-        Event event = eventRepository.findById(event_id)
-                .orElseThrow(() -> new NoSuchElementException("No event found with that id " + event_id));
-
-        // if we come here it means that the event exists and the organizer can add the
-        // seats to the Event object
-        // each event object has its seats as a List of seat objects List<Seat>
-        List<Seat> addedSeats = request.seatNumbers().stream().map(seat_no -> {
-            // for each seat number create a new seat object
-            Seat seat = new Seat();
-            seat.setSeatNumber(seat_no);
-            seat.setEvent(event);
-            return seat;
-        }).toList();
-
-        event.getSeats().addAll(addedSeats);
-        eventRepository.save(event);
-
-        return addedSeats.stream()
-                .map(s -> new SeatResponse(s.getId(), s.getSeatNumber(), s.getStatus().name()))
+        List<Seat> newSeats = request.seatNumbers().stream()
+                .map(number -> {
+                    Seat seat = new Seat();
+                    seat.setSeatNumber(number);
+                    seat.setEvent(event);
+                    return seat;
+                })
                 .toList();
 
+        event.getSeats().addAll(newSeats);
+        eventRepository.save(event); // cascades and saves the new seats too, thanks to CascadeType.ALL
+
+        return newSeats.stream()
+                .map(s -> new SeatResponse(s.getId(), s.getSeatNumber(), s.getStatus().name()))
+                .toList();
     }
 
     @Transactional(readOnly = true)
