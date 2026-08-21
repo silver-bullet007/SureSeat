@@ -1,19 +1,21 @@
 package com.seatsure.seatsure.service;
 
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
 import com.seatsure.seatsure.dto.BookingResponse;
 import com.seatsure.seatsure.dto.CreateBookingRequest;
 import com.seatsure.seatsure.dto.HoldResponse;
 import com.seatsure.seatsure.entity.Booking;
 import com.seatsure.seatsure.entity.Seat;
 import com.seatsure.seatsure.entity.User;
+import com.seatsure.seatsure.event.BookingConfirmedEvent;
+import com.seatsure.seatsure.event.BookingEventProducer;
 import com.seatsure.seatsure.repository.BookingRepository;
 import com.seatsure.seatsure.repository.SeatRepository;
 import com.seatsure.seatsure.repository.UserRepository;
 import com.seatsure.seatsure.security.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,18 +30,22 @@ public class BookingService {
     private static final Logger log = LoggerFactory.getLogger(BookingService.class);
     private static final long HOLD_DURATION_MINUTES = 5;
 
-    private final CacheManager cacheManager;
     private final SeatRepository seatRepository;
     private final UserRepository userRepository;
     private final BookingRepository bookingRepository;
+    private final CacheManager cacheManager;
+    private final BookingEventProducer eventProducer;
 
     public BookingService(SeatRepository seatRepository,
             UserRepository userRepository,
-            BookingRepository bookingRepository, CacheManager cacheManager) {
+            BookingRepository bookingRepository,
+            CacheManager cacheManager,
+            BookingEventProducer eventProducer) {
         this.seatRepository = seatRepository;
         this.userRepository = userRepository;
         this.bookingRepository = bookingRepository;
         this.cacheManager = cacheManager;
+        this.eventProducer = eventProducer;
     }
 
     // Step 1 of the real flow: hold a seat for HOLD_DURATION_MINUTES.
@@ -96,7 +102,24 @@ public class BookingService {
         Seat seat = booking.getSeat();
         seat.setStatus(Seat.SeatStatus.BOOKED);
         seatRepository.save(seat);
+        evictEventCache(seat.getEvent().getId());
         Booking saved = bookingRepository.save(booking);
+
+        // Publish the event AFTER the core work is committed. Wrapped in
+        // try/catch deliberately: a failure in this side effect (even a
+        // synchronous bug, not just an async Kafka failure) must never be
+        // able to prevent an already-successful booking from returning a
+        // response to the caller.
+        try {
+            eventProducer.publishBookingConfirmed(new BookingConfirmedEvent(
+                    saved.getId(),
+                    booking.getUser().getEmail(),
+                    seat.getEvent().getTitle(),
+                    seat.getSeatNumber(),
+                    LocalDateTime.now()));
+        } catch (Exception e) {
+            log.error("Failed to publish booking confirmed event for booking {}", saved.getId(), e);
+        }
 
         return new BookingResponse(
                 saved.getId(),
@@ -108,7 +131,7 @@ public class BookingService {
 
     // Step 3: the background job. Runs on a fixed schedule, finds any
     // PENDING booking whose hold has expired, and releases the seat.
-    @Scheduled(fixedRate = 60000) // runs every 60,000 ms = every 1 minute
+    @Scheduled(fixedRate = 60000)
     @Transactional
     public void releaseExpiredHolds() {
         List<Booking> expired = bookingRepository.findExpiredPendingBookings(
@@ -119,8 +142,16 @@ public class BookingService {
             Seat seat = booking.getSeat();
             seat.setStatus(Seat.SeatStatus.AVAILABLE);
             seatRepository.save(seat);
+            evictEventCache(seat.getEvent().getId());
             bookingRepository.save(booking);
             log.info("Released expired hold: booking {} seat {}", booking.getId(), seat.getSeatNumber());
+        }
+    }
+
+    private void evictEventCache(Long eventId) {
+        Cache cache = cacheManager.getCache("events");
+        if (cache != null) {
+            cache.evict(eventId);
         }
     }
 
@@ -141,6 +172,7 @@ public class BookingService {
 
         seat.setStatus(Seat.SeatStatus.BOOKED);
         seatRepository.save(seat);
+        evictEventCache(seat.getEvent().getId());
 
         Booking booking = new Booking();
         booking.setUser(user);
@@ -166,6 +198,7 @@ public class BookingService {
 
         seat.setStatus(Seat.SeatStatus.BOOKED);
         seatRepository.save(seat);
+        evictEventCache(seat.getEvent().getId());
 
         Booking booking = new Booking();
         booking.setUser(user);
@@ -184,12 +217,5 @@ public class BookingService {
                 seat.getSeatNumber(),
                 user.getEmail(),
                 saved.getStatus().name());
-    }
-
-    private void evictEventCache(Long event_id) {
-        Cache cache = cacheManager.getCache("events");
-        if (cache != null) {
-            cache.evict(event_id);
-        }
     }
 }
