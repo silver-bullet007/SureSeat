@@ -1,5 +1,7 @@
 package com.seatsure.seatsure.service;
 
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import com.seatsure.seatsure.dto.BookingResponse;
 import com.seatsure.seatsure.dto.CreateBookingRequest;
 import com.seatsure.seatsure.dto.HoldResponse;
@@ -26,16 +28,18 @@ public class BookingService {
     private static final Logger log = LoggerFactory.getLogger(BookingService.class);
     private static final long HOLD_DURATION_MINUTES = 5;
 
+    private final CacheManager cacheManager;
     private final SeatRepository seatRepository;
     private final UserRepository userRepository;
     private final BookingRepository bookingRepository;
 
     public BookingService(SeatRepository seatRepository,
             UserRepository userRepository,
-            BookingRepository bookingRepository) {
+            BookingRepository bookingRepository, CacheManager cacheManager) {
         this.seatRepository = seatRepository;
         this.userRepository = userRepository;
         this.bookingRepository = bookingRepository;
+        this.cacheManager = cacheManager;
     }
 
     // Step 1 of the real flow: hold a seat for HOLD_DURATION_MINUTES.
@@ -53,6 +57,7 @@ public class BookingService {
 
         seat.setStatus(Seat.SeatStatus.HELD);
         seatRepository.save(seat);
+        evictEventCache(seat.getEvent().getId());
 
         Booking booking = new Booking();
         booking.setUser(user);
@@ -179,5 +184,12 @@ public class BookingService {
                 seat.getSeatNumber(),
                 user.getEmail(),
                 saved.getStatus().name());
+    }
+
+    private void evictEventCache(Long event_id) {
+        Cache cache = cacheManager.getCache("events");
+        if (cache != null) {
+            cache.evict(event_id);
+        }
     }
 }
