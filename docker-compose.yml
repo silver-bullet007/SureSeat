@@ -2,12 +2,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: seatsure-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
 
   kafka:
     image: apache/kafka:3.8.0
     container_name: seatsure-kafka
+    restart: unless-stopped
     ports:
       - "9092:9092"
     environment:
